@@ -58,3 +58,18 @@ func (c *Config) AppNames() []string {
 	}
 	return names
 }
+
+// HasApp reports whether the given app name exists in the config.
+func (c *Config) HasApp(appName string) bool {
+	_, ok := c.Applications[appName]
+	return ok
+}
+
+// AllowedPaths returns the allowed executable paths for an app, or nil if none.
+func (c *Config) AllowedPaths(appName string) []string {
+	app, ok := c.Applications[appName]
+	if !ok {
+		return nil
+	}
+	return app.AllowedPaths
+}
