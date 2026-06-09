@@ -1,0 +1,10 @@
+
+applications:
+  myapp:
+    secrets:
+      - DATABASE_URL
+      - API_KEY
+  foo:
+    secrets:
+      - SECRET_KEY
+      - ANOTHER_SECRET
