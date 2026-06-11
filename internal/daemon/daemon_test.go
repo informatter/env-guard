@@ -15,12 +15,12 @@ import (
 )
 
 type mockVault struct {
-	secrets    map[string]map[string]string
-	logApp     string
-	logPath    string
-	logKeys    string
-	logPID     int
-	logged     bool
+	secrets       map[string]map[string]string
+	logApp        string
+	logPath       string
+	logKeys       string
+	logPID        int
+	logged        bool
 	getSecretsErr error
 }
 

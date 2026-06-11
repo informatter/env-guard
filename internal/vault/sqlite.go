@@ -62,14 +62,14 @@ type SQLiteVault struct {
 }
 
 type keySlotRow struct {
-	id               int64
-	purpose          string
-	salt             []byte
-	nonce            []byte
+	id                int64
+	purpose           string
+	salt              []byte
+	nonce             []byte
 	encryptedVaultKey []byte
-	argon2Time       int
-	argon2Memory     int
-	argon2Threads    int
+	argon2Time        int
+	argon2Memory      int
+	argon2Threads     int
 }
 
 // DefaultVaultPath returns the default path for the vault database:

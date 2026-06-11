@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/env-guard/env-guard/internal/config"
 	"github.com/env-guard/env-guard/internal/daemon"
@@ -16,7 +16,7 @@ import (
 type screen int
 
 const (
-	screenSetup    screen = iota
+	screenSetup screen = iota
 	screenPassword
 	screenDashboard
 	screenAccessLog
@@ -54,15 +54,15 @@ type model struct {
 	passwordError string
 	passwordInput textinput.Model
 
-	projects         []string
-	selectedProject  int
-	selectedSecret   int
-	secrets          []secretItem
-	focusPanel       int
-	editingSecret    int
-	showValues       bool
-	savedMessage     string
-	editInput        textinput.Model
+	projects        []string
+	selectedProject int
+	selectedSecret  int
+	secrets         []secretItem
+	focusPanel      int
+	editingSecret   int
+	showValues      bool
+	savedMessage    string
+	editInput       textinput.Model
 
 	daemonSocketPath string
 	daemon           *daemon.Daemon
@@ -104,11 +104,11 @@ func Run() int {
 	socketPath, _ := daemon.DefaultSocketPath()
 
 	m := model{
-		vaultPath:         vaultPath,
-		vault:             vault.New(vaultPath),
-		cfg:               cfg,
-		hasConfig:         hasConfig,
-		daemonSocketPath:  socketPath,
+		vaultPath:        vaultPath,
+		vault:            vault.New(vaultPath),
+		cfg:              cfg,
+		hasConfig:        hasConfig,
+		daemonSocketPath: socketPath,
 	}
 
 	if vaultExists {
