@@ -33,11 +33,12 @@ func unlockVault(m model, password string) (tea.Model, tea.Cmd) {
 		m.passwordInput.SetValue("")
 		m.passwordInput.Reset()
 		m.passwordInput.Focus()
-		if err == vault.ErrWrongPassword {
+		switch err {
+		case vault.ErrWrongPassword:
 			m.passwordError = "Wrong password"
-		} else if err == vault.ErrNoVault {
+		case vault.ErrNoVault:
 			m.passwordError = "Vault not found"
-		} else {
+		default:
 			m.passwordError = err.Error()
 		}
 		return m, nil
