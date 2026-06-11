@@ -38,11 +38,14 @@ func loadDashboard(m model) (tea.Model, tea.Cmd) {
 	m.savedMessage = ""
 
 	if len(projects) > 0 {
-		return loadSecrets(m)
+		loadedM, cmd := loadSecrets(m)
+		m2 := loadedM.(model)
+		autoM, _ := autoStartDaemon(m2)
+		return autoM, cmd
 	}
 
 	m.secrets = nil
-	return m, nil
+	return autoStartDaemon(m)
 }
 
 func loadSecrets(m model) (tea.Model, tea.Cmd) {

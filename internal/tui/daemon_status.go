@@ -13,6 +13,14 @@ type emptyConfigProvider struct{}
 func (e *emptyConfigProvider) HasApp(_ string) bool           { return true }
 func (e *emptyConfigProvider) AllowedPaths(_ string) []string { return nil }
 
+// autoStartDaemon creates and starts the daemon if it hasn't been started yet.
+// Called automatically when the dashboard loads after authentication.
+func autoStartDaemon(m model) (tea.Model, tea.Cmd) {
+	if m.daemon == nil {
+		return toggleDaemon(m)
+	}
+	return m, nil
+}
 
 // toggleDaemon starts or stops the daemon and updates the model state accordingly.
 func toggleDaemon(m model) (tea.Model, tea.Cmd) {
