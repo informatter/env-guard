@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 
 	"github.com/env-guard/env-guard/internal/config"
+	"github.com/env-guard/env-guard/internal/daemon"
 	"github.com/env-guard/env-guard/internal/vault"
 )
 
@@ -18,6 +19,7 @@ const (
 	screenSetup    screen = iota
 	screenPassword
 	screenDashboard
+	screenAccessLog
 )
 
 type secretItem struct {
@@ -61,6 +63,13 @@ type model struct {
 	showValues       bool
 	savedMessage     string
 	editInput        textinput.Model
+
+	daemonSocketPath string
+	daemon           *daemon.Daemon
+	daemonRunning    bool
+	daemonError      string
+	accessLog        []vault.AccessEntry
+	accessLogScroll  int
 }
 
 func Run() int {
@@ -92,11 +101,14 @@ func Run() int {
 	ti.CharLimit = 256
 	ti.Width = 40
 
+	socketPath, _ := daemon.DefaultSocketPath()
+
 	m := model{
-		vaultPath: vaultPath,
-		vault:     vault.New(vaultPath),
-		cfg:       cfg,
-		hasConfig: hasConfig,
+		vaultPath:         vaultPath,
+		vault:             vault.New(vaultPath),
+		cfg:               cfg,
+		hasConfig:         hasConfig,
+		daemonSocketPath:  socketPath,
 	}
 
 	if vaultExists {
@@ -141,6 +153,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.quitting {
 			switch msg.String() {
 			case "y", "Y":
+				if m.daemon != nil && m.daemonRunning {
+					m.daemon.Stop()
+				}
 				return m, tea.Quit
 			default:
 				m.quitting = false
@@ -164,6 +179,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return updatePassword(msg, m)
 		case screenDashboard:
 			return updateDashboard(msg, m)
+		case screenAccessLog:
+			return updateAccessLog(msg, m)
 		}
 
 	case vaultCreatedMsg:
@@ -189,6 +206,8 @@ func (m model) View() string {
 		return passwordView(m)
 	case screenDashboard:
 		return dashboardView(m)
+	case screenAccessLog:
+		return accessLogView(m)
 	}
 	return ""
 }

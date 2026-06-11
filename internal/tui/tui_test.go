@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -41,9 +42,9 @@ applications:
 func TestModelInit_NoVaultNoConfig(t *testing.T) {
 	ti := textinput.New()
 	m := model{
-		vaultPath: filepath.Join(t.TempDir(), "vault.db"),
-		vault:     vault.New(filepath.Join(t.TempDir(), "vault.db")),
-		screen:    screenSetup,
+		vaultPath:  filepath.Join(t.TempDir(), "vault.db"),
+		vault:      vault.New(filepath.Join(t.TempDir(), "vault.db")),
+		screen:     screenSetup,
 		setupInput: ti,
 	}
 
@@ -64,10 +65,10 @@ func TestModelInit_VaultExists(t *testing.T) {
 
 	ti := textinput.New()
 	m := model{
-		vaultPath:      dbPath,
-		vault:          vault.New(dbPath),
-		screen:         screenPassword,
-		passwordInput:  ti,
+		vaultPath:     dbPath,
+		vault:         vault.New(dbPath),
+		screen:        screenPassword,
+		passwordInput: ti,
 	}
 
 	if m.screen != screenPassword {
@@ -104,12 +105,12 @@ func TestSetupToDashboardFlow(t *testing.T) {
 
 	ti := textinput.New()
 	m := model{
-		vaultPath:      dbPath,
-		vault:          v2,
-		cfg:            cfg,
-		hasConfig:      true,
-		screen:         screenPassword,
-		passwordInput:  ti,
+		vaultPath:     dbPath,
+		vault:         v2,
+		cfg:           cfg,
+		hasConfig:     true,
+		screen:        screenPassword,
+		passwordInput: ti,
 	}
 
 	msg := tea.KeyMsg{Type: tea.KeyEnter}
@@ -233,6 +234,204 @@ func TestNavigateBetweenSecrets(t *testing.T) {
 	}
 
 	v2.Close()
+}
+
+func TestDaemonToggleStartStop(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+
+	v := vault.New(dbPath)
+	if err := v.Create("pw"); err != nil {
+		t.Fatal(err)
+	}
+	v.CreateProject("testapp")
+	v.Close()
+
+	v2 := vault.New(dbPath)
+	if err := v2.Open("pw"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := model{
+		vaultPath:        dbPath,
+		vault:            v2,
+		screen:           screenDashboard,
+		projects:         []string{"testapp"},
+		selectedProject:  0,
+		focusPanel:       0,
+		editingSecret:    -1,
+		daemonSocketPath: filepath.Join(dir, "test.sock"),
+	}
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m2 := res.(model)
+	if !m2.daemonRunning {
+		t.Fatal("expected daemon to start")
+	}
+	if m2.daemonError != "" {
+		t.Fatalf("unexpected daemon error: %s", m2.daemonError)
+	}
+
+	res, _ = m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m3 := res.(model)
+	if m3.daemonRunning {
+		t.Fatal("expected daemon to stop")
+	}
+
+	v2.Close()
+}
+
+func TestDaemonStatusView(t *testing.T) {
+	t.Run("stopped", func(t *testing.T) {
+		m := model{}
+		v := daemonStatusView(m)
+		if !strings.Contains(v, "stopped") {
+			t.Fatalf("expected 'stopped' in status view, got: %s", v)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		m := model{daemonError: "connection refused"}
+		v := daemonStatusView(m)
+		if !strings.Contains(v, "connection refused") {
+			t.Fatalf("expected error in status view, got: %s", v)
+		}
+	})
+}
+
+func TestAccessLogOpen(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+
+	v := vault.New(dbPath)
+	if err := v.Create("pw"); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.LogAccess("testapp", "/usr/bin/test", "DATABASE_URL", 12345); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.LogAccess("otherapp", "/usr/bin/other", "API_KEY", 67890); err != nil {
+		t.Fatal(err)
+	}
+	v.Close()
+
+	v2 := vault.New(dbPath)
+	if err := v2.Open("pw"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := model{
+		vaultPath: dbPath,
+		vault:     v2,
+		screen:    screenDashboard,
+	}
+
+	res, _ := openAccessLog(m)
+	m2 := res.(model)
+
+	if m2.screen != screenAccessLog {
+		t.Fatalf("expected screenAccessLog, got %d", m2.screen)
+	}
+	if len(m2.accessLog) != 2 {
+		t.Fatalf("expected 2 access log entries, got %d", len(m2.accessLog))
+	}
+	seen := map[string]bool{}
+	for _, e := range m2.accessLog {
+		seen[e.AppName] = true
+	}
+	if !seen["testapp"] || !seen["otherapp"] {
+		t.Fatalf("expected both apps in access log, got %+v", m2.accessLog)
+	}
+
+	v2.Close()
+}
+
+func TestAccessLogView(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		m := model{
+			screen:    screenAccessLog,
+			accessLog: []vault.AccessEntry{},
+		}
+		v := accessLogView(m)
+		if !strings.Contains(v, "No access log entries") {
+			t.Fatalf("expected empty message, got: %s", v)
+		}
+	})
+
+	t.Run("with entries", func(t *testing.T) {
+		m := model{
+			screen: screenAccessLog,
+			accessLog: []vault.AccessEntry{
+				{ID: 2, Timestamp: 2000, AppName: "app2", ProcessPath: "/bin/app2", KeysRequested: "KEY2", PID: 200},
+				{ID: 1, Timestamp: 1000, AppName: "app1", ProcessPath: "/bin/app1", KeysRequested: "KEY1", PID: 100},
+			},
+			height: 30,
+		}
+		v := accessLogView(m)
+		if !strings.Contains(v, "app2") || !strings.Contains(v, "app1") {
+			t.Fatalf("expected both entries in view, got: %s", v)
+		}
+		if !strings.Contains(v, "Access Log") {
+			t.Fatalf("expected title, got: %s", v)
+		}
+	})
+
+	t.Run("scroll", func(t *testing.T) {
+		entries := make([]vault.AccessEntry, 20)
+		for i := 0; i < 20; i++ {
+			entries[i] = vault.AccessEntry{
+				ID: int64(i), Timestamp: int64(1000 + i),
+				AppName: "app", ProcessPath: "/bin/app", KeysRequested: "KEY", PID: 100 + i,
+			}
+		}
+		m := model{
+			screen:          screenAccessLog,
+			accessLog:       entries,
+			accessLogScroll: 5,
+			height:          30,
+		}
+		v := accessLogView(m)
+		if !strings.Contains(v, "6") {
+			t.Fatalf("expected scroll indicator showing range, got: %s", v)
+		}
+	})
+}
+
+func TestAccessLogEscReturnsToDashboard(t *testing.T) {
+	m := model{
+		screen:    screenAccessLog,
+		accessLog: []vault.AccessEntry{},
+	}
+
+	res, _ := updateAccessLog(tea.KeyMsg{Type: tea.KeyEsc}, m)
+	m2 := res.(model)
+	if m2.screen != screenDashboard {
+		t.Fatalf("expected screenDashboard after Esc, got %d", m2.screen)
+	}
+}
+
+func TestAccessLogScroll(t *testing.T) {
+	entries := make([]vault.AccessEntry, 10)
+	for i := 0; i < 10; i++ {
+		entries[i] = vault.AccessEntry{ID: int64(i), AppName: "app"}
+	}
+	m := model{
+		screen:          screenAccessLog,
+		accessLog:       entries,
+		accessLogScroll: 5,
+	}
+
+	res, _ := updateAccessLog(tea.KeyMsg{Type: tea.KeyDown}, m)
+	m2 := res.(model)
+	if m2.accessLogScroll != 6 {
+		t.Fatalf("expected scroll 6 after down, got %d", m2.accessLogScroll)
+	}
+
+	res, _ = m2.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m3 := res.(model)
+	if m3.accessLogScroll != 5 {
+		t.Fatalf("expected scroll 5 after up, got %d", m3.accessLogScroll)
+	}
 }
 
 func TestNavigateBetweenSecretsAfterSave(t *testing.T) {

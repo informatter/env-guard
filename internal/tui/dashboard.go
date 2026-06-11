@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/env-guard/env-guard/internal/vault"
@@ -116,6 +116,12 @@ func updateDashboard(msg tea.KeyMsg, m model) (tea.Model, tea.Cmd) {
 		m.showValues = !m.showValues
 		return m, nil
 
+	case "d":
+		return toggleDaemon(m)
+
+	case "l":
+		return openAccessLog(m)
+
 	case "q":
 		m.quitting = true
 		return m, nil
@@ -149,10 +155,7 @@ func startEditSecret(m model) (tea.Model, tea.Cmd) {
 	ti.Prompt = ""
 	ti.Focus()
 	ti.CharLimit = 4096
-	ti.Width = m.width - 10
-	if ti.Width < 20 {
-		ti.Width = 20
-	}
+	ti.Width = max(m.width-10, 20)
 
 	if m.selectedSecret >= 0 && m.selectedSecret < len(m.secrets) {
 		secret := m.secrets[m.selectedSecret]
@@ -208,7 +211,8 @@ func dashboardView(m model) string {
 	view := lipgloss.JoinHorizontal(lipgloss.Top, panels...)
 
 	s += view + "\n\n"
-	s += helpStyle.Render("Tab: switch panel  •  ↑↓: navigate  •  Enter: edit  •  Ctrl+S: save  •  v: toggle values  •  q: quit")
+	s += helpStyle.Render("Tab: switch panel  •  ↑↓: navigate  •  Enter: edit  •  Ctrl+S: save  •  v: toggle values  •  d: daemon  •  l: log  •  q: quit")
+	s += "\n" + daemonStatusView(m)
 	return appStyle.Render(s)
 }
 
@@ -244,7 +248,7 @@ func renderSecretList(m model) string {
 
 	for i, secret := range m.secrets {
 		if m.editingSecret == i {
-			b.WriteString(activeProjectStyle.Render(secret.key+" = "))
+			b.WriteString(activeProjectStyle.Render(secret.key + " = "))
 			b.WriteString(m.editInput.View())
 			b.WriteString("  ")
 			b.WriteString(helpStyle.Render("[Ctrl+S save  Esc cancel]"))

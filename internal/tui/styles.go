@@ -79,4 +79,20 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("#7C3AED")).
 			MarginBottom(1)
+
+	daemonRunningStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#22C55E"))
+
+	daemonStoppedStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#52525B"))
+
+	daemonErrorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#EF4444"))
+
+	accessLogHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#A78BFA"))
+
+	accessLogEntryStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#A1A1AA"))
 )
