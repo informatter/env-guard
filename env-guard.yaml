@@ -1,6 +1,10 @@
+# Example env-guard.yaml configuration file
+# This file defines the applications that env-guard will manage, the allowed paths for each application, and the secrets that should be injected into their environments.
 
 applications:
   myapp:
+    allowed_paths:
+      - /home/nico/Programming/env-guard
     secrets:
       - DATABASE_URL
       - API_KEY
