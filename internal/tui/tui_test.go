@@ -13,10 +13,10 @@ import (
 	"github.com/env-guard/env-guard/internal/vault"
 )
 
-func tempVault(t *testing.T) *vault.SQLiteVault {
-	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "vault.db")
-	return vault.New(dbPath)
+func mockPAM() func() {
+	orig := verifyRootPassword
+	verifyRootPassword = func(password string) error { return nil }
+	return func() { verifyRootPassword = orig }
 }
 
 func writeConfig(t *testing.T, dir string) *config.Config {
@@ -432,6 +432,143 @@ func TestAccessLogScroll(t *testing.T) {
 	if m3.accessLogScroll != 5 {
 		t.Fatalf("expected scroll 5 after up, got %d", m3.accessLogScroll)
 	}
+}
+
+func TestPasswordScreenRecoveryTrigger(t *testing.T) {
+	restore := mockPAM()
+	defer restore()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+
+	v := vault.New(dbPath)
+	v.Create("pw")
+	v.Close()
+
+	v2 := vault.New(dbPath)
+
+	m := model{
+		vaultPath:     dbPath,
+		vault:         v2,
+		screen:        screenPassword,
+		passwordInput: textinput.New(),
+	}
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m2 := res.(model)
+	if m2.screen != screenRecovery {
+		t.Fatalf("expected screenRecovery, got %d", m2.screen)
+	}
+	if m2.recoveryStep != 0 {
+		t.Fatalf("expected recoveryStep 0, got %d", m2.recoveryStep)
+	}
+}
+
+func TestRecoveryWrongSystemPassword(t *testing.T) {
+	restore := mockPAM()
+	defer restore()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+
+	v := vault.New(dbPath)
+	v.Create("pw")
+	v.Close()
+
+	m := model{
+		vaultPath:     dbPath,
+		vault:         vault.New(dbPath),
+		screen:        screenRecovery,
+		recoveryStep:  0,
+		recoveryInput: textinput.New(),
+	}
+	m.recoveryInput.Focus()
+	m.recoveryInput.SetValue("wrong-pw")
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := res.(model)
+	if m2.screen != screenRecovery {
+		t.Fatalf("expected to stay on recovery screen, got %d", m2.screen)
+	}
+	if m2.recoveryError == "" {
+		t.Fatal("expected error for wrong system password")
+	}
+}
+
+func TestRecoveryEscReturnsToPassword(t *testing.T) {
+	m := model{
+		screen:        screenRecovery,
+		recoveryStep:  0,
+		recoveryInput: textinput.New(),
+	}
+
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := res.(model)
+	if m2.screen != screenPassword {
+		t.Fatalf("expected screenPassword after Esc, got %d", m2.screen)
+	}
+}
+
+func TestRecoveryFullFlow(t *testing.T) {
+	restore := mockPAM()
+	defer restore()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "vault.db")
+
+	v := vault.New(dbPath)
+	v.Create("old-pw")
+	v.SetRecoverySlot("root-pw")
+	v.Close()
+
+	m := model{
+		vaultPath:     dbPath,
+		vault:         vault.New(dbPath),
+		screen:        screenRecovery,
+		recoveryStep:  0,
+		recoveryInput: textinput.New(),
+	}
+	m.recoveryInput.Focus()
+	m.recoveryInput.SetValue("root-pw")
+
+	// Step 0: Enter root password (PAM mocked to always succeed)
+	res, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := res.(model)
+	if m2.recoveryStep != 1 {
+		t.Fatalf("expected recoveryStep 1 after root pw, got %d", m2.recoveryStep)
+	}
+
+	// Step 1: Enter new master password
+	m2.recoveryInput.Focus()
+	m2.recoveryInput.SetValue("new-pw")
+	res2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m3 := res2.(model)
+	if m3.recoveryStep != 2 {
+		t.Fatalf("expected recoveryStep 2 after new pw, got %d", m3.recoveryStep)
+	}
+
+	// Step 2: Confirm new master password
+	m3.recoveryInput.SetValue("new-pw")
+	res3, _ := m3.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m4 := res3.(model)
+	if m4.screen != screenDashboard {
+		t.Fatalf("expected screenDashboard after recovery, got %d", m4.screen)
+	}
+
+	// Verify new password works and old password does not
+	m4.vault.Close()
+
+	v3 := vault.New(dbPath)
+	if err := v3.Open("new-pw"); err != nil {
+		t.Fatalf("new password should work after recovery: %v", err)
+	}
+	v3.Close()
+
+	v4 := vault.New(dbPath)
+	if err := v4.Open("old-pw"); err == nil {
+		t.Fatal("old password should not work after recovery")
+	}
+	v4.Close()
 }
 
 func TestNavigateBetweenSecretsAfterSave(t *testing.T) {

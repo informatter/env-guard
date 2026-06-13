@@ -22,6 +22,10 @@ func updatePassword(msg tea.KeyMsg, m model) (tea.Model, tea.Cmd) {
 		return unlockVault(m, password)
 	}
 
+	if msg.String() == "r" {
+		return startRecovery(m)
+	}
+
 	return m, cmd
 }
 
@@ -60,6 +64,6 @@ func passwordView(m model) string {
 
 	s += labelStyle.Render("Master password:") + "\n"
 	s += m.passwordInput.View() + "\n\n"
-	s += helpStyle.Render("Enter to unlock  •  Ctrl+C to quit") + "\n"
+	s += helpStyle.Render("Enter to unlock  •  r: forgot password  •  Ctrl+C to quit") + "\n"
 	return appStyle.Render(s)
 }

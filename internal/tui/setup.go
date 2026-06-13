@@ -19,6 +19,8 @@ func updateSetup(msg tea.KeyMsg, m model) (tea.Model, tea.Cmd) {
 		return updateSetupConfirm(msg, m)
 	case 3:
 		return updateSetupDone(msg, m)
+	case 4:
+		return updateSetupRecoveryPw(msg, m)
 	}
 	return m, nil
 }
@@ -128,9 +130,54 @@ func createVault(m model) (tea.Model, tea.Cmd) {
 	}
 
 	m.creating = false
-	return m, tea.Batch(textinput.Blink, func() tea.Msg {
-		return vaultCreatedMsg{}
-	})
+	m.setupStep = 4
+	m.setupInput = textinput.New()
+	m.setupInput.Prompt = "▸ "
+	m.setupInput.EchoMode = textinput.EchoPassword
+	m.setupInput.Focus()
+	m.setupInput.CharLimit = 256
+	m.setupInput.Width = 40
+	m.setupError = ""
+	return m, textinput.Blink
+}
+
+func updateSetupRecoveryPw(msg tea.KeyMsg, m model) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.setupInput, cmd = m.setupInput.Update(msg)
+
+	if msg.String() == "enter" {
+		rootPw := m.setupInput.Value()
+		if rootPw == "" {
+			m.setupError = "Password cannot be empty"
+			return m, nil
+		}
+
+		if err := verifyRootPassword(rootPw); err != nil {
+			m.setupError = "Wrong system password"
+			return m, nil
+		}
+
+		if err := m.vault.SetRecoverySlot(rootPw); err != nil {
+			m.setupError = "Failed to set recovery: " + err.Error()
+			return m, nil
+		}
+
+		return loadDashboard(m)
+	}
+
+	if msg.String() == "esc" {
+		m.setupStep = 3
+		m.setupInput = textinput.New()
+		m.setupInput.Prompt = "▸ "
+		m.setupInput.Focus()
+		m.setupInput.CharLimit = 10
+		m.setupInput.Width = 10
+		m.setupInput.EchoMode = textinput.EchoNormal
+		m.setupError = ""
+		return m, nil
+	}
+
+	return m, cmd
 }
 
 func setupView(m model) string {
@@ -143,6 +190,8 @@ func setupView(m model) string {
 		return setupViewConfirm(m)
 	case 3:
 		return setupViewCreating(m)
+	case 4:
+		return setupViewRecoveryPw(m)
 	}
 	return ""
 }
@@ -176,8 +225,8 @@ func setupViewWelcome(m model) string {
 func setupViewPassword(m model) string {
 	s := logoStyle.Render("🔐 env-guard") + "\n\n"
 	s += headerStyle.Render("Step 1: Choose a Master Password") + "\n\n"
-	s += "This password encrypts all your secrets. " +
-		helpStyle.Render("Don't forget it — there's no recovery without it.") + "\n\n"
+	s += "This password encrypts all your secrets. " + "\n\n"
+
 	s += labelStyle.Render("Master password:") + "\n"
 	s += m.setupInput.View() + "\n"
 
@@ -214,5 +263,22 @@ func setupViewCreating(m model) string {
 		}
 		s += fmt.Sprintf("  • %d secret(s)\n", total)
 	}
+	return appStyle.Render(s)
+}
+
+func setupViewRecoveryPw(m model) string {
+	s := logoStyle.Render("🔐 env-guard") + "\n\n"
+	s += successStyle.Render("✓ Vault created!") + "\n\n"
+	s += headerStyle.Render("Set Up Password Recovery") + "\n\n"
+	s += "Enter your system password to enable master password recovery.\n"
+	s += "This lets you reset your master password if you forget it.\n\n"
+	s += labelStyle.Render("System password:") + "\n"
+	s += m.setupInput.View() + "\n"
+
+	if m.setupError != "" {
+		s += "\n" + errorStyle.Render("✗ "+m.setupError) + "\n"
+	}
+
+	s += "\n" + helpStyle.Render("Enter to confirm  •  Esc to skip")
 	return appStyle.Render(s)
 }

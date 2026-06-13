@@ -459,3 +459,188 @@ func TestDefaultVaultPath(t *testing.T) {
 		t.Fatal("expected non-empty path")
 	}
 }
+
+func TestSetRecoverySlot(t *testing.T) {
+	v := tempVault(t)
+	if err := v.Create("master-pw"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := v.SetRecoverySlot("root-pw"); err != nil {
+		t.Fatalf("SetRecoverySlot: %v", err)
+	}
+
+	if err := v.SetRecoverySlot("another-root"); err == nil {
+		t.Fatal("expected error for duplicate recovery slot")
+	}
+
+	v.Close()
+}
+
+func TestHasRecoverySlot(t *testing.T) {
+	t.Run("no recovery slot", func(t *testing.T) {
+		v := tempVault(t)
+		if err := v.Create("pw"); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		v.Close()
+
+		if v.HasRecoverySlot() {
+			t.Fatal("expected HasRecoverySlot to be false")
+		}
+	})
+
+	t.Run("with recovery slot", func(t *testing.T) {
+		v := tempVault(t)
+		if err := v.Create("pw"); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := v.SetRecoverySlot("root-pw"); err != nil {
+			t.Fatalf("SetRecoverySlot: %v", err)
+		}
+		v.Close()
+
+		if !v.HasRecoverySlot() {
+			t.Fatal("expected HasRecoverySlot to be true")
+		}
+	})
+
+	t.Run("works when locked", func(t *testing.T) {
+		v := tempVault(t)
+		if err := v.Create("pw"); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := v.SetRecoverySlot("root-pw"); err != nil {
+			t.Fatalf("SetRecoverySlot: %v", err)
+		}
+		v.Close()
+
+		v2 := New(v.dbPath)
+		if !v2.HasRecoverySlot() {
+			t.Fatal("expected HasRecoverySlot to work on locked vault")
+		}
+	})
+}
+
+func TestOpenWithRecovery(t *testing.T) {
+	v := tempVault(t)
+	if err := v.Create("master-pw"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := v.SetRecoverySlot("root-pw"); err != nil {
+		t.Fatalf("SetRecoverySlot: %v", err)
+	}
+	v.Close()
+
+	v2 := New(v.dbPath)
+	if err := v2.OpenWithRecovery("root-pw"); err != nil {
+		t.Fatalf("OpenWithRecovery: %v", err)
+	}
+	if !v2.IsOpen() {
+		t.Fatal("expected vault to be open")
+	}
+
+	v2.Close()
+}
+
+func TestOpenWithRecoveryWrongPassword(t *testing.T) {
+	v := tempVault(t)
+	if err := v.Create("master-pw"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := v.SetRecoverySlot("root-pw"); err != nil {
+		t.Fatalf("SetRecoverySlot: %v", err)
+	}
+	v.Close()
+
+	v2 := New(v.dbPath)
+	err := v2.OpenWithRecovery("wrong-root-pw")
+	if err != ErrWrongPassword {
+		t.Fatalf("expected ErrWrongPassword, got %v", err)
+	}
+}
+
+func TestOpenWithRecoveryNoSlot(t *testing.T) {
+	v := tempVault(t)
+	if err := v.Create("pw"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	v.Close()
+
+	v2 := New(v.dbPath)
+	err := v2.OpenWithRecovery("root-pw")
+	if err == nil {
+		t.Fatal("expected error for missing recovery slot")
+	}
+}
+
+func TestFullRecoveryFlow(t *testing.T) {
+	v := tempVault(t)
+	if err := v.Create("master-pw"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := v.SetRecoverySlot("root-pw"); err != nil {
+		t.Fatalf("SetRecoverySlot: %v", err)
+	}
+	v.Close()
+
+	v2 := New(v.dbPath)
+	if err := v2.OpenWithRecovery("root-pw"); err != nil {
+		t.Fatalf("OpenWithRecovery: %v", err)
+	}
+
+	if err := v2.ResetPassword("new-master-pw"); err != nil {
+		t.Fatalf("ResetPassword: %v", err)
+	}
+	v2.Close()
+
+	v3 := New(v.dbPath)
+	if err := v3.Open("new-master-pw"); err != nil {
+		t.Fatalf("Open with new password: %v", err)
+	}
+	v3.Close()
+
+	v4 := New(v.dbPath)
+	if err := v4.Open("master-pw"); err == nil {
+		t.Fatal("expected old password to no longer work")
+	}
+	v4.Close()
+}
+
+func TestResetPassword(t *testing.T) {
+	v := tempVault(t)
+	if err := v.Create("old-pw"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := v.CreateProject("testapp"); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if err := v.SetSecret("testapp", "KEY", "secret-value"); err != nil {
+		t.Fatalf("SetSecret: %v", err)
+	}
+	v.Close()
+
+	v2 := New(v.dbPath)
+	if err := v2.Open("old-pw"); err != nil {
+		t.Fatalf("Open with old password: %v", err)
+	}
+
+	if err := v2.ResetPassword("new-pw"); err != nil {
+		t.Fatalf("ResetPassword: %v", err)
+	}
+	v2.Close()
+
+	v3 := New(v.dbPath)
+	if err := v3.Open("new-pw"); err != nil {
+		t.Fatalf("Open with new password: %v", err)
+	}
+
+	val, err := v3.GetSecret("testapp", "KEY")
+	if err != nil {
+		t.Fatalf("GetSecret after reset: %v", err)
+	}
+	if val != "secret-value" {
+		t.Fatalf("expected 'secret-value', got %q", val)
+	}
+	v3.Close()
+}

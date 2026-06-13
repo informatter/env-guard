@@ -13,7 +13,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// vaultDir is the name of the directory where env-guards files will be stored.
 const vaultDir = ".env-guard"
+// vaultFile is the name of the SQLite database file that stores the encrypted secrets.
 const vaultFile = "vault.db"
 
 var schema = []string{
@@ -508,6 +510,132 @@ func (v *SQLiteVault) AccessLog() ([]AccessEntry, error) {
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
+}
+
+func (v *SQLiteVault) SetRecoverySlot(rootPassword string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if !v.open || v.vaultKey == nil {
+		return ErrVaultLocked
+	}
+
+	var count int
+	if err := v.db.QueryRow(`SELECT COUNT(*) FROM key_slots WHERE purpose = 'recovery'`).Scan(&count); err == nil && count > 0 {
+		return fmt.Errorf("recovery slot already exists")
+	}
+
+	salt, err := generateSalt()
+	if err != nil {
+		return fmt.Errorf("generating salt: %w", err)
+	}
+
+	derivedKey := deriveKey(rootPassword, salt)
+	encryptedKey, nonce, err := encrypt(v.vaultKey, derivedKey)
+	if err != nil {
+		return fmt.Errorf("encrypting vault key: %w", err)
+	}
+
+	_, err = v.db.Exec(
+		`INSERT INTO key_slots (purpose, salt, nonce, encrypted_vault_key, argon2_time, argon2_memory, argon2_threads)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"recovery", salt, nonce, encryptedKey, argon2Time, argon2Memory, argon2Thread,
+	)
+	if err != nil {
+		if isUniqueConstraintError(err) {
+			return fmt.Errorf("recovery slot already exists")
+		}
+		return fmt.Errorf("inserting recovery slot: %w", err)
+	}
+
+	return nil
+}
+
+func (v *SQLiteVault) HasRecoverySlot() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	db, err := sql.Open("sqlite", v.dbPath)
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+
+	var count int
+	err = db.QueryRow(`SELECT COUNT(*) FROM key_slots WHERE purpose = 'recovery'`).Scan(&count)
+	return err == nil && count > 0
+}
+
+func (v *SQLiteVault) OpenWithRecovery(rootPassword string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.db != nil {
+		return nil
+	}
+
+	if _, err := os.Stat(v.dbPath); os.IsNotExist(err) {
+		return ErrNoVault
+	}
+
+	db, err := sql.Open("sqlite", v.dbPath)
+	if err != nil {
+		return fmt.Errorf("opening database: %w", err)
+	}
+
+	if err := applyPragmas(db); err != nil {
+		db.Close()
+		return err
+	}
+
+	slot, err := readKeySlot(db, "recovery")
+	if err != nil {
+		db.Close()
+		return err
+	}
+
+	derivedKey := deriveKey(rootPassword, slot.salt)
+	vaultKey, err := decrypt(slot.encryptedVaultKey, derivedKey, slot.nonce)
+	if err != nil {
+		db.Close()
+		return ErrWrongPassword
+	}
+
+	v.db = db
+	v.vaultKey = vaultKey
+	v.open = true
+	return nil
+}
+
+func (v *SQLiteVault) ResetPassword(newPassword string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if !v.open || v.vaultKey == nil {
+		return ErrVaultLocked
+	}
+
+	salt, err := generateSalt()
+	if err != nil {
+		return fmt.Errorf("generating salt: %w", err)
+	}
+
+	derivedKey := deriveKey(newPassword, salt)
+	encryptedKey, nonce, err := encrypt(v.vaultKey, derivedKey)
+	if err != nil {
+		return fmt.Errorf("encrypting vault key: %w", err)
+	}
+
+	_, err = v.db.Exec(
+		`UPDATE key_slots SET salt = ?, nonce = ?, encrypted_vault_key = ?, argon2_time = ?, argon2_memory = ?, argon2_threads = ?
+		 WHERE purpose = 'master'`,
+		salt, nonce, encryptedKey, argon2Time, argon2Memory, argon2Thread,
+	)
+	if err != nil {
+		return fmt.Errorf("updating master key slot: %w", err)
+	}
+
+	return nil
 }
 
 func applyPragmas(db *sql.DB) error {

@@ -20,6 +20,7 @@ const (
 	screenPassword
 	screenDashboard
 	screenAccessLog
+	screenRecovery
 )
 
 type secretItem struct {
@@ -70,6 +71,12 @@ type model struct {
 	daemonError      string
 	accessLog        []vault.AccessEntry
 	accessLogScroll  int
+
+	recoveryStep   int
+	recoveryRootPw string
+	recoveryNewPw  string
+	recoveryError  string
+	recoveryInput  textinput.Model
 }
 
 func Run() int {
@@ -181,6 +188,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return updateDashboard(msg, m)
 		case screenAccessLog:
 			return updateAccessLog(msg, m)
+		case screenRecovery:
+			return updateRecovery(msg, m)
 		}
 
 	case vaultCreatedMsg:
@@ -208,6 +217,8 @@ func (m model) View() string {
 		return dashboardView(m)
 	case screenAccessLog:
 		return accessLogView(m)
+	case screenRecovery:
+		return recoveryView(m)
 	}
 	return ""
 }
