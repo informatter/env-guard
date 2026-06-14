@@ -39,17 +39,16 @@ func Login() int {
 		return 1
 	}
 
-	password := os.Getenv("ENV_GUARD_PASSWORD")
-	if password == "" {
-		fmt.Print("Master password: ")
-		passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
-			return 1
-		}
-		password = string(passwordBytes)
+	var password string
+
+	fmt.Print("Master password: ")
+	passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+		return 1
 	}
+	password = string(passwordBytes)
 
 	if password == "" {
 		fmt.Fprintln(os.Stderr, "Password cannot be empty.")
